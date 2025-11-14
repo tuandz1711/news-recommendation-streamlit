@@ -1,0 +1,6 @@
+flask
+scipy
+numpy
+streamlit
+pandas
+scikit-learn
