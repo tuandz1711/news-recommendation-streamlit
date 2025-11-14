@@ -1,37 +1,36 @@
+import streamlit as st
 import pandas as pd
 import joblib
-from flask import Flask, request, render_template_string
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.sparse import load_npz
 
-# ---------------------------------------------------------
-# 1. Load dữ liệu gốc
-# ---------------------------------------------------------
-df = pd.read_csv("gdelt_cleaned_with_text.csv")
-df = df.dropna(subset=["content"])
-df = df.reset_index(drop=True)
+# ---------------------------------------
+# Load dữ liệu
+# ---------------------------------------
+@st.cache_data
+def load_data():
+    df = pd.read_csv("gdelt_cleaned_with_text.csv")
+    df = df.dropna(subset=["content"])
+    df = df.reset_index(drop=True)
+    return df
 
-# ---------------------------------------------------------
-# 2. Load TF-IDF vectorizer (joblib)
-# ---------------------------------------------------------
-tfidf = joblib.load("tfidf_vectorizer.pkl")
+@st.cache_resource
+def load_model():
+    tfidf = joblib.load("tfidf_vectorizer.pkl")
+    tfidf_matrix = load_npz("tfidf_matrix.npz")
+    return tfidf, tfidf_matrix
 
-# ---------------------------------------------------------
-# 3. Load ma trận TF-IDF (npz)
-# ---------------------------------------------------------
-tfidf_matrix = load_npz("tfidf_matrix.npz")
 
-# ---------------------------------------------------------
-# 4. Hàm gợi ý bài báo
-# ---------------------------------------------------------
+df = load_data()
+tfidf, tfidf_matrix = load_model()
+
+
+# ---------------------------------------
+# Hàm gợi ý
+# ---------------------------------------
 def recommend_news(input_text, top_n=5):
-    # Vector hóa câu nhập vào
     input_vec = tfidf.transform([input_text])
-
-    # Tính cosine similarity
     cosine_sim = cosine_similarity(input_vec, tfidf_matrix).flatten()
-
-    # Lấy top các bài tương tự
     top_idx = cosine_sim.argsort()[-top_n:][::-1]
 
     results = []
@@ -45,52 +44,26 @@ def recommend_news(input_text, top_n=5):
     return results
 
 
-# ---------------------------------------------------------
-# 5. Flask App
-# ---------------------------------------------------------
-app = Flask(__name__)
+# ---------------------------------------
+# Giao diện Streamlit
+# ---------------------------------------
+st.title("🔍 Hệ thống gợi ý tin tức theo nội dung (TF-IDF Cosine Similarity)")
 
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Gợi ý tin tức</title>
-</head>
-<body>
-    <h2>Hệ thống gợi ý tin tức theo nội dung</h2>
+user_input = st.text_area("Nhập nội dung bài báo:", height=180)
 
-    <form action="/recommend" method="post">
-        <textarea name="text" rows="6" cols="70"
-        placeholder="Nhập nội dung tin tức để tìm bài tương tự..."></textarea><br><br>
-        <button type="submit">Gợi ý</button>
-    </form>
+if st.button("Gợi ý"):
+    if user_input.strip() == "":
+        st.warning("Vui lòng nhập nội dung!")
+    else:
+        results = recommend_news(user_input)
 
-    {% if results %}
-    <h2>Kết quả gợi ý</h2>
-    {% for r in results %}
-        <div style="margin-bottom:20px;">
-            <b>Tiêu đề:</b> {{ r.title }} <br>
-            <b>URL:</b> <a href="{{ r.url }}" target="_blank">{{ r.url }}</a> <br>
-            <b>Độ tương đồng:</b> {{ r.similarity }} <br>
-            <p>{{ r.content }}</p>
-        </div>
-        <hr>
-    {% endfor %}
-    {% endif %}
-</body>
-</html>
-"""
+        st.subheader("🔎 Kết quả gợi ý")
+        for r in results:
+            st.markdown(f"""
+            ### 📰 {r['title']}
+            **URL:** [Link bài báo]({r['url']})  
+            **Độ tương đồng:** `{r['similarity']}`  
 
-@app.route("/", methods=["GET"])
-def home():
-    return render_template_string(HTML_TEMPLATE)
-
-@app.route("/recommend", methods=["POST"])
-def recommend():
-    user_text = request.form["text"]
-    results = recommend_news(user_text)
-    return render_template_string(HTML_TEMPLATE, results=results)
-
-
-if __name__ == "__main__":
-    app.run(debug=True)
+            {r['content']}
+            ---
+            """)
